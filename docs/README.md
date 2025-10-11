@@ -1,73 +1,288 @@
-# Objetivo del sistema (versión ejecutiva)
+# Guía Técnica del Sistema de Liquidación Educativa – San Juan
 
-**Diseñar y desarrollar una plataforma web** que **automatice la liquidación de sueldos** de **docentes y no docentes** de colegios **privados de San Juan**, **cumpliendo** normativa **provincial y nacional**, **trazable y auditable**, con **datos parametrizables** (índices, convenios, topes, adicionales, aportes y contribuciones) y **capacidad de escalar** a **presentaciones oficiales** (exportes/archivos/reportes compatibles con las exigencias vigentes).
-
-**Estado:** Propuesto
-
-**Versión:** 1.0
-
-**Última actualización:** 10-Oct-2025
-
-**Propietario:** Miguel (Liquidación de Sueldos)
-
-**Colaboración:** Dev / Contabilidad / Auditoría
+> **Versión:** 1.0 — Octubre 2025
+> **Autor:** Miguel
+> **Revisado por:** ChatGPT (Asesor Senior – Arquitectura & Backend)
 
 ---
 
-## Problema que resuelve
+## 🧭 Índice
 
-* Procesos manuales, propensos a errores y lentos.
-* Dificultad para seguir cambios normativos y aumentos por mes/categoría.
-* Falta de trazabilidad, auditoría y formatos listos para presentar.
+1. [Introducción](#introducción)
+2. [Arquitectura General](#arquitectura-general)
+3. [Diseño de Módulos](#diseño-de-módulos)
 
-## Alcance funcional (MVP)
+   * [Módulo 1: Legajos y Cargos (Core Data)](#módulo-1-legajos-y-cargos-core-data)
+   * [Módulo 2: Parámetros Salariales (Configuration)](#módulo-2-parámetros-salariales-configuration)
+   * [Módulo-3-liquidación-the-engine)](#módulo-3-liquidación-the-engine)
+   * [Módulo 4: Integración y Reportes (Compliance & Output)](#módulo-4-integración-y-reportes-compliance--output)
+   * [Módulo 5: Herramientas Auxiliares (Utils)](#módulo-5-herramientas-auxiliares-utils)
+4. [Buenas Prácticas y Calidad de Código](#buenas-prácticas-y-calidad-de-código)
+5. [Seguridad y Observabilidad](#seguridad-y-observabilidad)
+6. [Testing y CI/CD](#testing-y-cicd)
+7. [Trade-offs y Decisiones Clave](#trade-offs-y-decisiones-clave)
+8. [Estructura de Carpetas](#estructura-de-carpetas)
+9. [Preguntas Abiertas / Pendientes](#preguntas-abiertas--pendientes)
 
-* **Modelado de cargos y horas** (docentes/no docentes; múltiples cargos por persona).
-* **Motor de cálculo**: básicos, adicionales (antigüedad, radio/permanencia, E-códigos/A/F, SAC, licencias/prorrateos), descuentos legales, aportes y contribuciones.
-* **Tablas parametrizables** por mes: índices, incrementos, nomencladores, multiplicadores, topes.
-* **Gestión de novedades**: días, licencias, ausencias, diferencias de cargos, reconocimiento de servicios.
-* **Liquidación mensual y recibo** (previsualización + PDF).
-* **Auditoría**: desgloses y justificativos “cálculo a cálculo”.
-* **Exportables**: planillas y archivos para carga externa (contabilidad, bancos, libros de sueldos digitales y/o presentaciones).
-* **Usuarios/roles** (administrador, liquidación, auditor/contador, solo lectura).
+---
 
-## Fuera de alcance (MVP) – roadmap
+## 🧱 Introducción
 
-* Portal de autogestión completo para empleados.
-* Integraciones contables/ERP a medida (se dejan conectores genéricos/exportes).
-* Motor tributario nacional completo (SICOSS/Libro Sueldo Digital AFIP) más allá de exportes compatibles iniciales.
-* Notificaciones automáticas multicanal.
+Este documento define la **arquitectura técnica, diseño de módulos y estándares de desarrollo** para el proyecto **Sistema de Liquidación Educativa de San Juan**.
 
-## Criterios de éxito (KPI)
+El objetivo es construir una **plataforma robusta, auditable y escalable** para la liquidación de sueldos docentes, con foco en:
 
-* **Exactitud**: ≥99,5% de coincidencia con liquidaciones de referencia auditadas.
-* **Tiempo**: reducción ≥60% del tiempo de armado por colegio vs. proceso manual actual.
-* **Trazabilidad**: 100% de conceptos con explicación y fórmula visible.
-* **Parametrización**: actualización mensual de índices y tablas sin tocar código.
-* **Confiabilidad**: 0 caídas durante ventana de liquidación (picos de uso).
-* **Cumplimiento**: validaciones contra topes/reglas claves antes de emitir recibos.
+* Cumplimiento normativo provincial y nacional (AFIP, LSD, Banco San Juan)
+* Escalabilidad en cálculos masivos
+* Auditoría total de resultados
+* Mantenibilidad y extensibilidad a futuro
 
-## Restricciones y supuestos
+El diseño sigue los principios **SOLID**, el paradigma **DDD (Domain-Driven Design)** y las prácticas de ingeniería de software modernas.
 
-* **Normativa**: soportar normativa provincial San Juan + referencias nacionales aplicables y convenios de privados (docentes y no docentes).
-* **Datos maestros**: nomencladores y tablas provienen de fuentes oficiales y se cargan mensualmente (JSON/CSV).
-* **Auditoría**: cada cálculo debe quedar reproducible (mismo input ⇒ mismo output).
-* **Privacidad**: datos personales bajo prácticas de seguridad y mínimos privilegios.
-* **Escalabilidad**: preparada para múltiples colegios/plantas y períodos.
+---
 
-## Entregables de esta fase
+## ⚙️ Arquitectura General
 
-1. **Documento de Objetivo y Éxito** (este doc).
-2. **Mapa de conceptos** (catálogos: categorías, códigos A/E/F, adicionales, descuentos).
-3. **Matriz de reglas** (qué se calcula, cómo, en qué orden, con ejemplos).
-4. **Plan de datos** (formato y esquema para índices, nomencladores, incrementos, etc.).
-5. **Plan de pruebas** (casos: maestro jornada simple, director, no docente, múltiples cargos, SAC, licencias, diferencias, etc.).
+### Stack Tecnológico
 
-## Definition of Done (de esta etapa)
+| Componente            | Tecnología                        | Justificación                                                                              |
+| --------------------- | --------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Backend**           | Node.js (LTS) + TypeScript        | Tipado fuerte y ecosistema maduro.                                                         |
+| **Framework**         | NestJS                            | Arquitectura modular, inyección de dependencias, y alta testabilidad.                      |
+| **Base de Datos**     | PostgreSQL                        | ACID, integridad referencial y soporte para JSONB.                                         |
+| **ORM**               | Prisma                            | Tipado end-to-end y migraciones seguras.                                                   |
+| **Colas/Jobs**        | BullMQ + Redis                    | Procesamiento asíncrono de liquidaciones masivas, generación de PDFs y archivos bancarios. |
+| **Observabilidad**    | OpenTelemetry + Pino logs         | Métricas, trazas y auditoría de ejecución.                                                 |
+| **Frontend**          | React + TypeScript                | Escalabilidad y rendimiento para el UI.                                                    |
+| **Testing**           | Jest (unitario), Playwright (E2E) | Cobertura total con entorno controlado.                                                    |
+| **Contenedorización** | Docker                            | Entornos consistentes Dev/Staging/Prod.                                                    |
 
-* Objetivo aprobado.
-* KPI acordados.
-* Lista de conceptos/reglas priorizada para el MVP.
-* Esquemas de datos validados (ejemplo de archivos de un mes).
-* Set mínimo de casos de prueba consensuado.
+### Patrón Arquitectónico
 
+**Monolito Modular** (MVP), con posibilidad de migrar a microservicios por dominio:
+
+* `core/` (agentes, designaciones, servicios previos)
+* `engine/` (cálculo, conceptos, fórmulas)
+* `output/` (reportes, AFIP, banco, PDFs)
+
+---
+
+## 🧩 Diseño de Módulos
+
+### Módulo 1: Legajos y Cargos (Core Data)
+
+**Objetivo:** Fuente única de verdad (SSOT) para agentes, designaciones y servicios.
+
+#### Decisiones Clave
+
+* Cada `Designacion` posee un **ID inmutable** con `vigenteDesde/vigenteHasta`.
+* Se incluye un `HistorialMovimientoDesignacion` (motivo, fecha, tipo de cambio) para trazabilidad completa.
+* `AntiguedadService` calcula dinámicamente los años efectivos a la fecha de liquidación.
+
+#### Modelo de Datos (Prisma simplificado)
+
+```prisma
+model Agente {
+  id           String   @id @default(uuid())
+  cuit         String   @unique
+  dni          String   @unique
+  apellido     String
+  nombre       String
+  designaciones Designacion[]
+  serviciosPrevios ServicioPrevio[]
+  movimientos   HistorialMovimientoDesignacion[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+```
+
+---
+
+### Módulo 2: Parámetros Salariales (Configuration)
+
+**Objetivo:** Desacoplar la lógica de cálculo de los valores monetarios.
+
+#### Estructura
+
+* `ParametroBase`: versión por `fecha_vigencia` con bundle atómico (índice docente, valor punto, topes, etc.)
+* `Concepto`: definición de cada ítem (código interno, AFIP, tipo, fórmula, prioridad).
+* `ReglaDeCalculo`: puntero a función implementada en el Engine.
+* Validación de archivos de configuración con **Zod** o **JSON Schema**.
+
+#### Mejora
+
+* Permitir parámetros **transitorios** (bonos únicos o excepciones) con `vigenteHasta` puntual.
+
+---
+
+### Módulo 3: Liquidación (The Engine)
+
+**Objetivo:** Lógica de negocio pura, determinista y testeable.
+
+#### Flujo General
+
+1. Cargar agente + designaciones + novedades a fecha.
+2. Obtener parámetros vigentes.
+3. Calcular base (puntos × índice).
+4. Ejecutar conceptos mediante funciones puras (`rules/`).
+5. Consolidar resultados y registrar auditoría.
+
+#### Interfaz Base
+
+```ts
+export interface LiquidacionResult {
+  agenteId: string;
+  periodo: string;
+  items: ItemCalculado[];
+  totales: { remunerativo: Decimal; noRemunerativo: Decimal; descuentos: Decimal; neto: Decimal; };
+  trazabilidad: { parametrosVigentesId: string; hashInput: string; };
+}
+```
+
+#### Mejores Prácticas Incorporadas
+
+* **Rollback transaccional** por agente.
+* **Idempotencia** (no duplicar liquidaciones).
+* **Memoización** interna en cálculos repetitivos.
+* **Cache** de antigüedad y parámetros vigentes.
+* **Rastreo** con hash único y trazas OpenTelemetry.
+
+---
+
+### Módulo 4: Integración y Reportes (Compliance & Output)
+
+**Objetivo:** Cumplimiento legal y salida de datos.
+
+* `LsdGeneratorService`: genera archivos AFIP (TXT/JSON) validados con JSON Schema.
+* `ArchivoBancarioService`: drivers por banco (interfaz `BankAdapter`).
+* `RecibosService`: genera PDF firmados digitalmente (Puppeteer + hash SHA-256 + firma X.509).
+* **Pre-flight validator:** chequea totales y formatos antes de emitir archivos.
+
+---
+
+### Módulo 5: Herramientas Auxiliares (Utils)
+
+**Objetivo:** Apoyo funcional sin impacto en la corrida mensual.
+
+| Herramienta                         | Descripción                                | Implementación                         |
+| ----------------------------------- | ------------------------------------------ | -------------------------------------- |
+| **Simulador de Cargos**             | Calcula diferencias entre cargos o radios. | Usa el Engine en modo simulación.      |
+| **Reconocimiento de Servicios**     | CRUD de servicios docentes previos.        | Alimenta al `AntiguedadService`.       |
+| **Comparador por Radio/Antigüedad** | Muestra impacto directo de variaciones.    | UI con export CSV.                     |
+| **Validador Normativo**             | Detecta inconsistencias administrativas.   | Reglas automáticas previas a liquidar. |
+
+---
+
+## 🧩 Buenas Prácticas y Calidad de Código
+
+* **SOLID:** Cada servicio con una sola responsabilidad.
+* **Extensibilidad:** Nuevos conceptos agregables sin tocar el core (`Open/Closed`).
+* **Inyección de Dependencias:** Usar interfaces abstractas para persistencia y servicios.
+* **Manejo de Errores:** Clases específicas + middleware global.
+* **Documentación:** Uso de JSDoc y `Typedoc` o `Compodoc`.
+* **Feature Flags:** activar nuevos conceptos sin redeploy.
+
+---
+
+## 🔒 Seguridad y Observabilidad
+
+| Área                           | Estrategia                                                            |
+| ------------------------------ | --------------------------------------------------------------------- |
+| **Autenticación/Autorización** | RBAC con guardias NestJS + scopes por institución (multi-tenant).     |
+| **Validación de Input**        | DTOs con `class-validator` y sanitización.                            |
+| **Secretos**                   | Variables de entorno gestionadas por `@nestjs/config`.                |
+| **Auditoría**                  | Tabla `AuditLog` con timestamp, usuario, acción y entidad modificada. |
+| **Cifrado de Datos**           | CUIT/DNI cifrados con AES-GCM.                                        |
+| **Observabilidad**             | OpenTelemetry + Pino logs estructurados.                              |
+| **Rate Limiting**              | Control en endpoints de descargas (PDF/TXT).                          |
+
+---
+
+## 🧪 Testing y CI/CD
+
+### Estrategia de Testing
+
+* **Unitario (Jest):** 100% cobertura en `engine/rules`.
+* **Property-based Testing:** con `fast-check` para redondeos y prorrateos.
+* **Integración:** Motor + DB (Prisma test env).
+* **E2E (Playwright):** flujos críticos (crear agente → correr liquidación → generar LSD/PDF).
+* **Fixtures:** escenarios reales anonimizados.
+
+### CI/CD Pipeline
+
+1. Lint (ESLint) + formato (Prettier).
+2. Type-check.
+3. Unit + Integration Tests.
+4. Build Docker multi-stage.
+5. Deploy a **staging** con seeders automáticos.
+6. E2E contra staging.
+7. Deploy a **prod** con migraciones transaccionales.
+
+### Seeds y Versionado
+
+```bash
+npm run seed:test
+npm run seed:staging
+```
+
+Versiones etiquetadas semánticamente (`v1.0.0-liquidacion`, `v1.1.0-LSD`).
+
+---
+
+## ⚖️ Trade-offs y Decisiones Clave
+
+| Tema                | Decisión                                             | Justificación                                        |
+| ------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| **Persistencia**    | Opción B: Detalle por ítem (`ItemLiquidacion`).      | Auditoría total y generación directa de recibos/LSD. |
+| **Fórmulas**        | Opción A: Implementadas en código TypeScript.        | Seguridad y testabilidad.                            |
+| **Ganancias**       | Solo retención automática (sin F.572).               | Simplifica MVP.                                      |
+| **Infraestructura** | Monolito modular con posibilidad de escisión futura. | Equilibrio entre complejidad y mantenibilidad.       |
+
+---
+
+## 📁 Estructura de Carpetas
+
+```
+/apps/api
+  /src
+    /modules
+      agentes/
+      designaciones/
+      parametros/
+      conceptos/
+      liquidacion/
+        engine/
+          rules/
+          services/
+          dto/
+        repositories/
+      reportes/
+      integraciones/
+        afip/
+        bancos/
+      recibos/
+    /shared
+      /domain
+      /infra
+      /utils
+  /test
+    /unit
+    /integration
+    /e2e
+/prisma
+  schema.prisma
+```
+
+---
+
+## ❓ Preguntas Abiertas / Pendientes
+
+1. ¿El sistema debe soportar **multi-institución** en un mismo período con parámetros diferentes?
+2. ¿Habrá **estados de liquidación** (BORRADOR → VALIDADA → FINAL)?
+3. ¿Confirmar uso de **certificado X.509** para firma digital?
+4. ¿Layouts adicionales además de Banco San Juan?
+5. ¿Manejo de **retroactivos** paritarios? (Re-liquidaciones automáticas).
+
+---
+
+> *Esta guía sirve como base técnica oficial para el desarrollo del MVP y las futuras evoluciones del Sistema de Liquidación Educativa – San Juan.*
