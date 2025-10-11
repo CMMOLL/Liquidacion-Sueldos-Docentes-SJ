@@ -1,0 +1,285 @@
+// schema.prisma — Sistema de Liquidación Educativa – San Juan
+// Versión: 1.0 (Oct-2025)
+// Nota: Montos en Decimal(18,4). Recomendación: usar minor units (centavos) en la capa de dominio para cálculos.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// ===== Enums =====
+
+enum RolUsuario {
+  ADMIN
+  LIQUIDADOR
+  AUDITOR
+  LECTURA
+}
+
+enum TipoDesignacion {
+  CARGO
+  HCNM
+  HCNS
+  OTRO
+}
+
+enum NivelEducativo {
+  PRIMARIO
+  SECUNDARIO
+  SUPERIOR
+  OTRO
+}
+
+enum TipoConcepto {
+  REM   // Remunerativo
+  NR    // No remunerativo
+  DESC  // Descuento
+  CONT  // Contribución
+}
+
+enum AplicaA {
+  DOCENTE
+  NO_DOCENTE
+  AMBOS
+}
+
+enum EstadoLiquidacion {
+  BORRADOR
+  VALIDADA
+  FINAL
+}
+
+enum TipoNovedad {
+  INASISTENCIA
+  LICENCIA
+  PREMIO
+  AJUSTE
+  OTRA
+}
+
+enum ActorTipo {
+  USUARIO
+  SISTEMA
+  JOB
+}
+
+enum EntidadAuditada {
+  AGENTE
+  DESIGNACION
+  PARAMETRO_BASE
+  CONCEPTO
+  LIQUIDACION
+  NOVEDAD
+  INSTITUCION
+  USUARIO
+}
+
+/// ===== Modelos de seguridad / multi-tenant =====
+
+model Institucion {
+  id            String        @id @default(uuid())
+  nombre        String
+  cuit          String?       @db.VarChar(20)
+  activo        Boolean       @default(true)
+  designaciones Designacion[]
+  liquidaciones Liquidacion[]
+  novedades     Novedad[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([nombre])
+}
+
+model Usuario {
+  id          String     @id @default(uuid())
+  email       String     @unique
+  nombre      String
+  rol         RolUsuario
+  // Si necesitás multi-tenant por usuario, podrías agregar:
+  // institucionId String?
+  // institucion   Institucion? @relation(fields: [institucionId], references: [id])
+  activo      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+/// ===== Core Data =====
+
+model Agente {
+  id               String              @id @default(uuid())
+  cuit             String              @unique
+  dni              String              @unique
+  apellido         String
+  nombre           String
+  designaciones    Designacion[]
+  serviciosPrevios ServicioPrevio[]
+  liquidaciones    Liquidacion[]
+  novedades        Novedad[]
+  movimientos      HistorialMovimientoDesignacion[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([apellido, nombre])
+  @@index([cuit])
+  @@index([dni])
+}
+
+model Designacion {
+  id              String        @id @default(uuid())
+  agenteId        String
+  institucionId   String
+  tipo            TipoDesignacion
+  nivel           NivelEducativo
+  horasOCargo     Decimal       @db.Decimal(10,2) // cantidad de horas o 1 para cargo
+  porcentajeSubv  Decimal       @db.Decimal(5,2)  // 0..100
+  vigenteDesde    DateTime
+  vigenteHasta    DateTime?
+  agente          Agente        @relation(fields: [agenteId], references: [id])
+  institucion     Institucion   @relation(fields: [institucionId], references: [id])
+  movimientos     HistorialMovimientoDesignacion[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([agenteId, vigenteDesde, vigenteHasta])
+  @@index([institucionId])
+}
+
+model HistorialMovimientoDesignacion {
+  id             String      @id @default(uuid())
+  designacionId  String
+  fecha          DateTime    @default(now())
+  motivo         String
+  campo          String?     // opcional: nombre del campo afectado
+  valorAnterior  String?
+  valorNuevo     String?
+  designacion    Designacion @relation(fields: [designacionId], references: [id])
+}
+
+model ServicioPrevio {
+  id           String   @id @default(uuid())
+  agenteId     String
+  institucion  String
+  desde        DateTime
+  hasta        DateTime
+  tipo         String   // categoría/cargo
+  agente       Agente   @relation(fields: [agenteId], references: [id])
+
+  @@index([agenteId, desde, hasta])
+}
+
+/// ===== Parámetros (versionados por vigencia) =====
+
+model ParametroBase {
+  id               String    @id @default(uuid())
+  vigenteDesde     DateTime
+  vigenteHasta     DateTime?
+  indiceDocente    Decimal   @db.Decimal(18,4)
+  valorPuntoCct    Decimal   @db.Decimal(18,4)
+  topes            Json?
+  alicuotas        Json?
+  reglasRedondeo   Json?     // p.ej. { "moneda": "ROUND_HALF_UP", "dias": "TRUNCATE" }
+  version          String?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([vigenteDesde])
+  @@index([vigenteDesde, vigenteHasta])
+}
+
+model Concepto {
+  id            String       @id @default(uuid())
+  codigo        String       @unique
+  nombre        String
+  tipo          TipoConcepto
+  aplicaA       AplicaA
+  orden         Int
+  codigoAfip    String?
+  // Nombre de la función implementada en el engine (rules/*)
+  regla         String
+  activo        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([tipo, aplicaA, orden])
+}
+
+/// ===== Novedades =====
+
+model Novedad {
+  id             String        @id @default(uuid())
+  agenteId       String
+  institucionId  String?
+  tipo           TipoNovedad
+  fechaInicio    DateTime
+  fechaFin       DateTime?
+  porcentaje     Decimal?      @db.Decimal(7,4) // ej. 0.5 = 50%
+  monto          Decimal?      @db.Decimal(18,4)
+  notas          String?
+  agente         Agente        @relation(fields: [agenteId], references: [id])
+  institucion    Institucion?  @relation(fields: [institucionId], references: [id])
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([agenteId, fechaInicio, fechaFin])
+  @@index([institucionId])
+}
+
+/// ===== Liquidación y resultados desagregados =====
+
+model Liquidacion {
+  id             String           @id @default(uuid())
+  agenteId       String
+  institucionId  String
+  periodo        String           // "YYYY-MM"
+  estado         EstadoLiquidacion @default(BORRADOR)
+  neto           Decimal          @db.Decimal(18,4)
+  totales        Json?            // { remunerativo, noRemunerativo, descuentos }
+  trazabilidad   Json?            // { parametrosVigentesId, hashInput, ... }
+  items          ItemLiquidacion[]
+  agente         Agente           @relation(fields: [agenteId], references: [id])
+  institucion    Institucion      @relation(fields: [institucionId], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([agenteId, periodo])
+  @@index([institucionId, periodo])
+  @@unique([agenteId, institucionId, periodo, estado])
+}
+
+model ItemLiquidacion {
+  id               String        @id @default(uuid())
+  liquidacionId    String
+  conceptoCodigo   String
+  tipo             TipoConcepto
+  monto            Decimal       @db.Decimal(18,4)
+  base             Decimal?      @db.Decimal(18,4)
+  regla            String        // nombre de la función aplicada
+  detalles         Json?         // { aniosAntig, porcentaje, ... }
+  liquidacion      Liquidacion   @relation(fields: [liquidacionId], references: [id])
+
+  @@index([liquidacionId])
+  @@index([conceptoCodigo])
+}
+
+/// ===== Auditoría =====
+
+model AuditLog {
+  id           String          @id @default(uuid())
+  actorTipo    ActorTipo
+  actorId      String?
+  entidad      EntidadAuditada
+  entidadId    String
+  accion       String          // CREATE, UPDATE, DELETE, RUN, EXPORT, etc.
+  diff         Json?
+  ip           String?
+  createdAt    DateTime        @default(now())
+
+  @@index([entidad, entidadId, createdAt])
+}
